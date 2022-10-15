@@ -9,6 +9,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.aop.framework.ProxyFactoryBean;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -41,7 +42,7 @@ class Stage1Test {
 
     @Test
     void testChangePassword() {
-        final UserService userService = null;
+        final UserService userService = createTransactionalProxy(new UserService(userDao, userHistoryDao));
 
         final var newPassword = "qqqqq";
         final var createBy = "gugu";
@@ -54,15 +55,28 @@ class Stage1Test {
 
     @Test
     void testTransactionRollback() {
-        final UserService userService = null;
+        final UserService userService = createTransactionalProxy(new UserService(userDao, stubUserHistoryDao));
 
         final var newPassword = "newPassword";
         final var createBy = "gugu";
         assertThrows(DataAccessException.class,
-                () -> userService.changePassword(1L, newPassword, createBy));
+            () -> userService.changePassword(1L, newPassword, createBy));
 
         final var actual = userService.findById(1L);
 
         assertThat(actual.getPassword()).isNotEqualTo(newPassword);
+    }
+
+    @SuppressWarnings("unchecked")
+    private <T> T createTransactionalProxy(T target) {
+        ProxyFactoryBean proxyFactoryBean = new ProxyFactoryBean();
+        proxyFactoryBean.setTarget(target);
+        proxyFactoryBean.setProxyTargetClass(true);
+
+        TransactionPointcut transactionPointcut = new TransactionPointcut();
+        TransactionAdvice transactionAdvice = new TransactionAdvice(platformTransactionManager);
+        proxyFactoryBean.addAdvisor(new TransactionAdvisor(transactionPointcut, transactionAdvice));
+
+        return (T) proxyFactoryBean.getObject();
     }
 }
